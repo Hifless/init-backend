@@ -7,8 +7,11 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, W
 log = logging.getLogger("bot")
 
 
-async def start_bot(bot: Bot):
-    dp = Dispatcher()
+async def start_bot():
+    from config import get_settings
+    settings = get_settings()
+    bot = Bot(token=settings.BOT_TOKEN)
+    await dp.start_polling(bot)
 
     webapp_url = os.getenv("WEBAPP_URL", "")
     admin_tg   = int(os.getenv("ADMIN_TG_ID", "0"))
