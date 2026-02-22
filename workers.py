@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from database import (AsyncSessionLocal, ArbitrageSnapshot, PriceHistory,
                       Alert, User, Position)
-from parsers.buff import fetch_buff_page, fetch_cny_usd
+from parsers.buff import fetch_buff_page, fetch_cny_usd_rate
 from parsers.markets import fetch_cgm, fetch_skinport
 from parsers.arbitrage import calc_arbitrage, liquidity_label
 
@@ -21,7 +21,7 @@ _cny_updated: float = 0.0
 async def _update_rate(session: aiohttp.ClientSession):
     global _cny_usd, _cny_updated
     if time.time() - _cny_updated > 3600:
-        rate = await fetch_cny_usd(session)
+        rate = await fetch_cny_usd_rate(session)
         if rate:
             _cny_usd = rate
             _cny_updated = time.time()
