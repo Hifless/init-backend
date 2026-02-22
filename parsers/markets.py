@@ -14,6 +14,15 @@ _sp_ts:     float = 0
 
 CACHE_TTL = 300  # 5 мин
 
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Origin": "https://skinport.com",
+    "Referer": "https://skinport.com/",
+}
+
 
 # ── CSGOMarket ────────────────────────────────────────────────────────────────
 async def fetch_cgm(session: aiohttp.ClientSession) -> dict[str, float]:
@@ -50,8 +59,8 @@ async def fetch_skinport(session: aiohttp.ClientSession) -> dict[str, float]:
         async with session.get(
             "https://api.skinport.com/v1/items",
             params={"app_id": 730, "currency": "USD", "tradable": 0},
-            headers={"Accept": "application/json"},
-            timeout=aiohttp.ClientTimeout(total=20),
+            headers=BROWSER_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
             if resp.status == 200:
                 data = await resp.json()
@@ -90,20 +99,14 @@ async def fetch_steam_price(session: aiohttp.ClientSession, name: str) -> float 
 
 
 # ── Арбитраж калькулятор ──────────────────────────────────────────────────────
-# Комиссии при продаже (продавец теряет):
 FEES = {
-    "cgm":      0.07,   # CSGOMarket 7%
-    "skinport": 0.12,   # Skinport 12%
-    "steam":    0.15,   # Steam 15%
+    "cgm":      0.07,
+    "skinport": 0.12,
+    "steam":    0.15,
 }
 
 def calc_arbitrage(buy_price: float, market_prices: dict) -> dict:
-    """
-    buy_price  — цена покупки на Buff (USD)
-    market_prices — {"cgm": ..., "skinport": ..., "steam": ...}
-    """
     results = {}
-
     labels = {"cgm": "CSGOMarket (-7%)", "skinport": "Skinport (-12%)", "steam": "Steam (-15%)"}
 
     for platform, price in market_prices.items():
