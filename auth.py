@@ -66,19 +66,19 @@ async def activate_key(db: AsyncSession, key: str, tg_id: int,
 
 
 async def ensure_owner(db: AsyncSession, tg_id: int, username: str = "") -> tuple:
-    """Создаёт owner-аккаунт если не существует. Возвращает (user, key_or_None)."""
     user = await get_user_by_tg(db, tg_id)
     if user:
         return user, None
 
     key = generate_key("OWNER")
+    # Сначала создаём юзера
     user = User(tg_id=tg_id, username=username, role="owner", access_key=key)
     db.add(user)
-    ak = AccessKey(key=key, owner_id=None, is_used=True,
+    await db.flush()  # получаем user.id без коммита
+
+    # Теперь создаём ключ с правильным owner_id
+    ak = AccessKey(key=key, owner_id=user.id, is_used=True,
                    used_by_tg=tg_id, used_at=datetime.utcnow())
     db.add(ak)
-    await db.commit()
-    # Обновляем owner_id
-    ak.owner_id = user.id
     await db.commit()
     return user, key
