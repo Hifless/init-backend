@@ -77,6 +77,17 @@ async def gen_key(tg_id: int, db: AsyncSession = Depends(get_db)):
     key = await create_access_key(db, tg_id)
     return {"key": key}
 
+class ActivateIn(BaseModel):
+    key: str
+
+@users.post("/activate")
+async def activate_key_endpoint(tg_id: int, body: ActivateIn, db: AsyncSession = Depends(get_db)):
+    result = await activate_key(db, body.key.strip().upper(), tg_id, username="")
+    if not result["ok"]:
+        raise HTTPException(400, result["reason"])
+    user = await get_user_by_tg(db, tg_id)
+    return {"ok": True, "has_access": True}
+
 
 # ===========================================================================
 # ARBITRAGE
