@@ -3,8 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
 import logging
+import os
 
-from database import init_db
+from database import init_db, AsyncSessionLocal
 from routers.routes import users, arbitrage, charts, alerts, portfolio, trades
 from workers import start_workers
 from bot.bot import start_bot
@@ -20,6 +21,18 @@ log = logging.getLogger("skintel")
 async def lifespan(app: FastAPI):
     await init_db()
     log.info("✅ БД инициализирована")
+
+    # Авто-создание owner при первом запуске
+    owner_tg_id = int(os.getenv("OWNER_TG_ID", "0"))
+    if owner_tg_id:
+        from auth import ensure_owner
+        async with AsyncSessionLocal() as db:
+            user, key = await ensure_owner(db, owner_tg_id, "owner")
+            if key:
+                log.info(f"🔑 OWNER KEY: {key}")
+            else:
+                log.info("👑 Owner уже существует")
+
     asyncio.create_task(start_workers())
     asyncio.create_task(start_bot())
     log.info("✅ Воркеры и бот запущены")

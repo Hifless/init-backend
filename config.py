@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production"
     ADMIN_TG_ID: int = 0
     DEBUG: bool = False
+    OWNER_TG_ID: int = 0
 
     class Config:
         env_file = ".env"
