@@ -32,7 +32,7 @@ class SettingsIn(BaseModel):
 async def get_me(tg_id: int, db: AsyncSession = Depends(get_db)):
     user = await get_user_by_tg(db, tg_id)
     if not user:
-        raise HTTPException(404, "Не найден")
+        return {"has_access": False, "tg_id": tg_id}
     buff_age = None
     if user.buff_updated_at:
         buff_age = (datetime.utcnow() - user.buff_updated_at).days
@@ -85,9 +85,7 @@ async def activate_key_endpoint(tg_id: int, body: ActivateIn, db: AsyncSession =
     result = await activate_key(db, body.key.strip().upper(), tg_id, username="")
     if not result["ok"]:
         raise HTTPException(400, result["reason"])
-    user = await get_user_by_tg(db, tg_id)
     return {"ok": True, "has_access": True}
-
 
 # ===========================================================================
 # ARBITRAGE
