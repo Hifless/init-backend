@@ -1,6 +1,7 @@
 import logging
 import os
 from aiogram import Bot, Dispatcher, F
+dp = Dispatcher()
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
