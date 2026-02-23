@@ -83,6 +83,21 @@ async def gen_key(tg_id: int, db: AsyncSession = Depends(get_db)):
 # ===========================================================================
 arbitrage = APIRouter()
 
+import re as _re
+
+def _normalize_icon(icon_url: str | None) -> str | None:
+    """Всегда возвращает /api/img?p=HASH, независимо от формата в БД."""
+    if not icon_url:
+        return None
+    # Уже правильный формат
+    if icon_url.startswith("/api/img"):
+        return icon_url
+    # Старый формат: полный Steam CDN URL
+    m = _re.search(r"/economy/image/([^/?]+)", icon_url)
+    if m:
+        return f"/api/img?p={m.group(1)}"
+    return icon_url
+
 FEES = {"cgm": 0.07, "skinport": 0.12, "steam": 0.15}
 
 @arbitrage.get("/list")
@@ -137,19 +152,42 @@ async def list_arb(tg_id: int, min_roi: float = 0, sort: str = "roi",
                 "roi":        round(roi, 1),
             }
 
-        # Стабильность: если цена выросла >50% за 24ч — нестабильно (PUMP)
+        # ── АЛГОРИТМ СТАБИЛЬНОСТИ ──────────────────────────────────────
         ph = price_24h.get(s.name)
         price_change_24h = None
         is_unstable = False
+        unstable_reasons = []
+
+        # 1. Рост цены Buff за 24ч > 50% → PUMP
         if ph and ph["first"] > 0:
             price_change_24h = round((ph["last"] - ph["first"]) / ph["first"] * 100, 1)
-            is_unstable = price_change_24h > 50
+            if price_change_24h > 50:
+                is_unstable = True
+                unstable_reasons.append("pump_24h")
+
+        # 2. Мало продавцов + высокий ROI → кто-то один выставил по нереальной цене
+        #    Gut Knife 1 продавец ROI 125% — классика этого кейса
+        best_roi_val = max((v["roi"] for v in platforms.values()), default=0)
+        if s.buff_sell_num < 3 and best_roi_val > 25:
+            is_unstable = True
+            unstable_reasons.append("low_supply_high_roi")
+
+        # 3. Аномально высокий ROI при небольшом числе продавцов
+        #    Если ROI > 60% и продавцов < 10 — с вероятностью 90% это выброс
+        if best_roi_val > 60 and s.buff_sell_num < 10:
+            is_unstable = True
+            unstable_reasons.append("abnormal_roi")
+
+        # 4. ROI > 40% при нулевом спросе (покупателей < 2) — продать не выйдет
+        if best_roi_val > 40 and s.buff_buy_num < 2:
+            is_unstable = True
+            unstable_reasons.append("no_demand")
 
         buff_cny = (s.buff_price or 0) / cny_usd if cny_usd else 0
         liq = "high" if s.buff_sell_num > 50 else ("med" if s.buff_sell_num > 15 else "low")
         items.append({
             "name":             s.name,
-            "icon_url":         s.icon_url,
+            "icon_url":         _normalize_icon(s.icon_url),
             "buff_price":       s.buff_price,
             "buff_price_cny":   round(buff_cny, 0),
             "buff_price_rub":   round((s.buff_price or 0) * usd_rub, 0),
@@ -160,6 +198,7 @@ async def list_arb(tg_id: int, min_roi: float = 0, sort: str = "roi",
             "liquidity":        liq,
             "price_change_24h": price_change_24h,
             "is_unstable":      is_unstable,
+            "unstable_reason":  unstable_reasons[0] if unstable_reasons else None,
             "platforms":        platforms,
             "updated_at":       s.updated_at.isoformat(),
         })
