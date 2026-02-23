@@ -32,7 +32,7 @@ class SettingsIn(BaseModel):
 async def get_me(tg_id: int, db: AsyncSession = Depends(get_db)):
     user = await get_user_by_tg(db, tg_id)
     if not user:
-        return {"has_access": False, "tg_id": tg_id}
+        raise HTTPException(404, "Не найден")
     buff_age = None
     if user.buff_updated_at:
         buff_age = (datetime.utcnow() - user.buff_updated_at).days
@@ -77,15 +77,6 @@ async def gen_key(tg_id: int, db: AsyncSession = Depends(get_db)):
     key = await create_access_key(db, tg_id)
     return {"key": key}
 
-class ActivateIn(BaseModel):
-    key: str
-
-@users.post("/activate")
-async def activate_key_endpoint(tg_id: int, body: ActivateIn, db: AsyncSession = Depends(get_db)):
-    result = await activate_key(db, body.key.strip().upper(), tg_id, username="")
-    if not result["ok"]:
-        raise HTTPException(400, result["reason"])
-    return {"ok": True, "has_access": True}
 
 # ===========================================================================
 # ARBITRAGE
@@ -98,10 +89,31 @@ FEES = {"cgm": 0.07, "skinport": 0.12, "steam": 0.15}
 async def list_arb(tg_id: int, min_roi: float = 0, sort: str = "roi",
                    db: AsyncSession = Depends(get_db)):
     user = await current_user(tg_id, db)
+    cny_usd = user.cny_usd or 0.138
+    usd_rub = user.usd_rub or 90.0
+    cny_rub = cny_usd * usd_rub
+
     res = await db.execute(
         select(ArbitrageSnapshot).where(ArbitrageSnapshot.best_roi >= min_roi)
     )
     snaps = res.scalars().all()
+
+    # Загружаем историю цен за 24ч для определения нестабильности
+    since_24h = datetime.utcnow() - timedelta(hours=24)
+    hist_res = await db.execute(
+        select(PriceHistory)
+        .where(PriceHistory.platform == "buff", PriceHistory.recorded_at >= since_24h)
+        .order_by(PriceHistory.recorded_at)
+    )
+    hist_rows = hist_res.scalars().all()
+
+    # Строим dict: name -> (oldest_price, newest_price) за 24ч
+    price_24h: dict = {}
+    for h in hist_rows:
+        if h.name not in price_24h:
+            price_24h[h.name] = {"first": h.price_usd, "last": h.price_usd}
+        else:
+            price_24h[h.name]["last"] = h.price_usd
 
     items = []
     for s in snaps:
@@ -110,33 +122,49 @@ async def list_arb(tg_id: int, min_roi: float = 0, sort: str = "roi",
             if not price: continue
             fee     = FEES.get(pkey, 0.07)
             net_usd = price * (1 - fee)
+            net_cny = net_usd / cny_usd if cny_usd else 0
             profit  = net_usd - (s.buff_price or 0)
             roi     = profit / (s.buff_price or 1) * 100
             platforms[pkey] = {
                 "label":      {"cgm": "CSGOMarket (-7%)", "skinport": "Skinport (-12%)", "steam": "Steam (-15%)"}[pkey],
                 "sell_price": round(price, 2),
                 "net_usd":    round(net_usd, 2),
-                "net_rub":    round(net_usd * user.usd_rub, 0),
+                "net_cny":    round(net_cny, 0),
+                "net_rub":    round(net_usd * usd_rub, 0),
                 "profit_usd": round(profit, 2),
-                "profit_rub": round(profit * user.usd_rub, 0),
+                "profit_cny": round(profit / cny_usd if cny_usd else 0, 0),
+                "profit_rub": round(profit * usd_rub, 0),
                 "roi":        round(roi, 1),
             }
+
+        # Стабильность: если цена выросла >50% за 24ч — нестабильно (PUMP)
+        ph = price_24h.get(s.name)
+        price_change_24h = None
+        is_unstable = False
+        if ph and ph["first"] > 0:
+            price_change_24h = round((ph["last"] - ph["first"]) / ph["first"] * 100, 1)
+            is_unstable = price_change_24h > 50
+
+        buff_cny = (s.buff_price or 0) / cny_usd if cny_usd else 0
         liq = "high" if s.buff_sell_num > 50 else ("med" if s.buff_sell_num > 15 else "low")
         items.append({
-            "name":         s.name,
-            "icon_url":     s.icon_url,
-            "buff_price":   s.buff_price,
-            "buff_price_rub": round((s.buff_price or 0) * user.usd_rub, 0),
-            "best_roi":     s.best_roi,
-            "best_sell":    s.best_sell_platform,
-            "sell_num":     s.buff_sell_num,
-            "buy_num":      s.buff_buy_num,
-            "liquidity":    liq,
-            "platforms":    platforms,
-            "updated_at":   s.updated_at.isoformat(),
+            "name":             s.name,
+            "icon_url":         s.icon_url,
+            "buff_price":       s.buff_price,
+            "buff_price_cny":   round(buff_cny, 0),
+            "buff_price_rub":   round((s.buff_price or 0) * usd_rub, 0),
+            "best_roi":         s.best_roi,
+            "best_sell":        s.best_sell_platform,
+            "sell_num":         s.buff_sell_num,
+            "buy_num":          s.buff_buy_num,
+            "liquidity":        liq,
+            "price_change_24h": price_change_24h,
+            "is_unstable":      is_unstable,
+            "platforms":        platforms,
+            "updated_at":       s.updated_at.isoformat(),
         })
 
-    if sort == "roi":   items.sort(key=lambda x: x["best_roi"], reverse=True)
+    if sort == "roi":     items.sort(key=lambda x: x["best_roi"], reverse=True)
     elif sort == "price": items.sort(key=lambda x: x["buff_price"] or 0)
     return items
 
