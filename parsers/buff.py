@@ -64,13 +64,10 @@ async def fetch_buff_page(session: aiohttp.ClientSession, buff_session: str,
                         goods_info = item.get("goods_info", {}) or {}
                         icon_path  = goods_info.get("icon_url", "")
 
-                        # Steam CDN — надёжный источник картинок
+                        # Сохраняем raw path — CDN подставляется через прокси
                         steam_img = None
                         if icon_path:
-                            steam_img = (
-                                f"https://community.cloudflare.steamstatic.com"
-                                f"/economy/image/{icon_path}/96fx96f"
-                            )
+                            steam_img = f"/api/img?p={icon_path}"
 
                         steam_cny = float(goods_info.get("steam_price", 0) or 0)
 
